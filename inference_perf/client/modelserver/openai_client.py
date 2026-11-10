@@ -115,6 +115,7 @@ class openAIModelServerClient(ModelServerClient):
         lora_config: Optional[List[MultiLoRAConfig]] = None,
         request_retries: int = 0,
         request_retry_backoff_sec: float = 0.5,
+        skip_readiness_check: bool = False,
     ) -> None:
         super().__init__(
             api_config,
@@ -132,6 +133,7 @@ class openAIModelServerClient(ModelServerClient):
         self.cert_path = cert_path
         self.key_path = key_path
         self.lora_config = lora_config
+        self.skip_readiness_check = skip_readiness_check
 
         # Initialize OTEL instrumentation (configured via environment variables)
         self.otel = get_otel_instrumentation()
@@ -142,9 +144,14 @@ class openAIModelServerClient(ModelServerClient):
         tokenizer_config = tokenizer_config if tokenizer_config is not None else CustomTokenizerConfig()
         self.tokenizer_config = tokenizer_config
 
+        if self.skip_readiness_check and model_name is None:
+            raise ValueError("model_name is required when skip_readiness_check is true")
+
         # Before the /v1/models probe below, so a server still loading its weights is
-        # waited for instead of failing model auto-detection.
-        self.wait_until_ready()
+        # waited for instead of failing model auto-detection. Skipped when benchmarking
+        # a scale-from-zero pool that wakes up only after load starts arriving.
+        if not self.skip_readiness_check:
+            self.wait_until_ready()
 
         supported_models: Optional[List[dict[str, Any]]] = None
         inferred_entry: Optional[dict[str, Any]] = None
@@ -167,7 +174,7 @@ class openAIModelServerClient(ModelServerClient):
             # Deferred, not probed here: a name that loads its own tokenizer never needs
             # the entry, and probing first would cost every pinned-name run one request
             # (and one timeout against a server that has no /v1/models at all).
-            probe_for_root = not tokenizer_config.pretrained_model_name_or_path
+            probe_for_root = not tokenizer_config.pretrained_model_name_or_path and not self.skip_readiness_check
 
         if self.lora_config is not None:
             if supported_models is None:

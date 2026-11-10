@@ -194,3 +194,23 @@ def test_404_ends_the_wait_after_earlier_failures() -> None:
     _build(mock_get, clock)
     assert mock_get.call_count == 2
     assert clock.sleeps == [1.0]
+
+
+# skip_readiness_check=True with pinned model_name -> zero HTTP probes to /health or /v1/models (scale-from-zero safe).
+@pytest.mark.parametrize("client_cls", [vLLMModelServerClient, SGlangModelServerClient, TGImodelServerClient])
+def test_skip_readiness_check_makes_zero_http_probes(client_cls: Type[openAIModelServerClient]) -> None:
+    mock_get = MagicMock(side_effect=AssertionError("readiness probe should be skipped"))
+    clock = FakeClock()
+    client = _build(mock_get, clock, client_cls=client_cls, skip_readiness_check=True)
+    mock_get.assert_not_called()
+    assert clock.sleeps == []
+    assert client.model_name == MODEL
+    assert client.skip_readiness_check is True
+
+
+# skip_readiness_check=True without model_name -> rejected immediately rather than probing /v1/models.
+def test_skip_readiness_check_requires_model_name() -> None:
+    mock_get = MagicMock(side_effect=AssertionError("must not probe /v1/models"))
+    with pytest.raises(ValueError, match="model_name is required when skip_readiness_check is true"):
+        _build(mock_get, FakeClock(), model_name=None, skip_readiness_check=True)
+    mock_get.assert_not_called()

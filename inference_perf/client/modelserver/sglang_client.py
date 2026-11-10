@@ -40,6 +40,7 @@ class SGlangModelServerClient(openAIModelServerClient):
         cert_path: Optional[str] = None,
         key_path: Optional[str] = None,
         lora_config: Optional[List[MultiLoRAConfig]] = None,
+        skip_readiness_check: bool = False,
     ) -> None:
         super().__init__(
             metrics_collector,
@@ -57,6 +58,7 @@ class SGlangModelServerClient(openAIModelServerClient):
             lora_config=lora_config,
             request_retries=request_retries,
             request_retry_backoff_sec=request_retry_backoff_sec,
+            skip_readiness_check=skip_readiness_check,
         )
         self.metric_filters = [f"model_name='{self.model_name}'", *additional_filters]
 

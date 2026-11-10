@@ -418,6 +418,7 @@ Security: Filter expressions use eval() and should only contain trusted input. |
 | `--server.model_name` | str | Model name sent in each request. Auto-detected from the server if unset. |
 | `--server.base_url` | str | Base URL of the model server, e.g. 'http://localhost:8000'. |
 | `--server.ignore_eos` | boolean | Ask the server to keep generating past the end-of-sequence token so outputs hit the requested length. |
+| `--server.skip_readiness_check` | boolean | Skip the startup readiness probe before sending load, e.g. when benchmarking a scale-from-zero pool that wakes up on incoming traffic. |
 | `--server.api_key` | str | API key sent as a bearer token with each request. Redacted in the logged and saved config. |
 | `--server.cert_path` | str | Path to a client TLS certificate file. |
 | `--server.key_path` | str | Path to the private key for the client TLS certificate. |

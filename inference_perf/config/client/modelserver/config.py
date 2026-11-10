@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Optional
 
 from inference_perf.config.common import StrictBaseModel
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 
 
 class ModelServerType(Enum):
@@ -35,9 +35,19 @@ class ModelServerClientConfig(StrictBaseModel):
         default=True,
         description="Ask the server to keep generating past the end-of-sequence token so outputs hit the requested length.",
     )
+    skip_readiness_check: bool = Field(
+        default=False,
+        description="Skip the startup readiness probe before sending load, e.g. when benchmarking a scale-from-zero pool that wakes up on incoming traffic.",
+    )
     api_key: Optional[SecretStr] = Field(
         default=None,
         description="API key sent as a bearer token with each request. Redacted in the logged and saved config.",
     )
     cert_path: Optional[str] = Field(default=None, description="Path to a client TLS certificate file.")
     key_path: Optional[str] = Field(default=None, description="Path to the private key for the client TLS certificate.")
+
+    @model_validator(mode="after")
+    def validate_server_options(self) -> "ModelServerClientConfig":
+        if self.skip_readiness_check and not self.model_name and self.type != ModelServerType.MOCK:
+            raise ValueError("model_name is required when skip_readiness_check is true")
+        return self
