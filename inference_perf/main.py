@@ -53,6 +53,7 @@ from inference_perf.datagen import (
     VisionArenaDataGenerator,
 )
 from inference_perf.client.modelserver import (
+    LLMDAsyncRedisModelServerClient,
     ModelServerClient,
     vLLMModelServerClient,
     SGlangModelServerClient,
@@ -309,6 +310,25 @@ def main_cli() -> None:
             # Don't overwrite tokenizer if mock client doesn't provide one
             if model_server_client.tokenizer is not None:
                 tokenizer = model_server_client.tokenizer
+        if config.server.type == ModelServerType.LLMD_ASYNC_REDIS:
+            redis_cfg = config.server.llmd_async_redis
+            redis_password = redis_cfg.password.get_secret_value() if redis_cfg and redis_cfg.password else None
+            model_server_client = LLMDAsyncRedisModelServerClient(
+                reportgen.get_metrics_collector(),
+                api_config=config.api,
+                uri=config.server.base_url,
+                model_name=config.server.model_name,
+                tokenizer_config=config.tokenizer,
+                additional_filters=config.metrics.prometheus.filters if config.metrics and config.metrics.prometheus else [],
+                redis_config=redis_cfg,
+                redis_password=redis_password,
+                ignore_eos=config.server.ignore_eos,
+                timeout=config.load.request_timeout,
+                request_retries=config.load.request_retries,
+                request_retry_backoff_sec=config.load.request_retry_backoff_sec,
+                lora_config=config.load.lora_traffic_split,
+            )
+            tokenizer = model_server_client.tokenizer
         # The client resolved the run's tokenizer; report generation rebuilds its own
         # from the config, so hand it over here.
         sync_tokenizer_config(config, model_server_client)

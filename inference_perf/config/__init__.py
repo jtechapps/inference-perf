@@ -34,6 +34,7 @@ from inference_perf.config.client.filestorage import (
     StorageConfigBase,
 )
 from inference_perf.config.client.modelserver import (
+    LLMDAsyncRedisConfig,
     ModelServerClientConfig,
     ModelServerType,
 )
@@ -112,6 +113,7 @@ __all__ = [
     "GoodputConfig",
     "GoogleCloudStorageConfig",
     "ImageDatagenConfig",
+    "LLMDAsyncRedisConfig",
     "LoadConfig",
     "LoadStage",
     "LoadType",

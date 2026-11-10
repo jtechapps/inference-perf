@@ -414,13 +414,19 @@ Security: Filter expressions use eval() and should only contain trusted input. |
 | `--storage.simple_storage_service.endpoint_url` | str | Custom endpoint URL, for S3-compatible object stores. |
 | `--storage.simple_storage_service.region_name` | str | AWS region of the bucket. |
 | `--storage.simple_storage_service.addressing_style` | string | S3 addressing style: 'auto', 'virtual' (bucket in hostname) or 'path'. |
-| `--server.type` | Enum (vllm, sglang, tgi, mock) | Type of model server being benchmarked. |
+| `--server.type` | Enum (vllm, sglang, tgi, mock, llmd_async_redis) | Type of model server being benchmarked. |
 | `--server.model_name` | str | Model name sent in each request. Auto-detected from the server if unset. |
 | `--server.base_url` | str | Base URL of the model server, e.g. 'http://localhost:8000'. |
 | `--server.ignore_eos` | boolean | Ask the server to keep generating past the end-of-sequence token so outputs hit the requested length. |
 | `--server.api_key` | str | API key sent as a bearer token with each request. Redacted in the logged and saved config. |
 | `--server.cert_path` | str | Path to a client TLS certificate file. |
 | `--server.key_path` | str | Path to the private key for the client TLS certificate. |
+| `--server.llmd_async_redis.request_queue_name` | str | Redis SortedSet key where llm-d-async request envelopes are enqueued. |
+| `--server.llmd_async_redis.result_queue_name` | str | Redis list key from which llm-d-async ResultMessage envelopes are consumed via BRPOP. |
+| `--server.llmd_async_redis.default_deadline_seconds` | int | Default per-request deadline offset in seconds when no per-request deadline header is present. |
+| `--server.llmd_async_redis.tenant` | str | Default tenant identifier stamped into envelope metadata when x-llm-d-tenant is not set. |
+| `--server.llmd_async_redis.password` | str | Optional Redis AUTH password overriding any password in base_url. Redacted in the logged and saved config. |
+| `--server.llmd_async_redis.clear_queues_before_run` | boolean | Delete request_queue_name and result_queue_name once before starting load. |
 | `--tokenizer.pretrained_model_name_or_path` | str | HuggingFace model name or local path of the tokenizer to load. |
 | `--tokenizer.trust_remote_code` | boolean | Allow the tokenizer to execute code from its repository when loading. |
 | `--tokenizer.token` | str | HuggingFace access token used to download the tokenizer. Redacted in the logged and saved config. |
