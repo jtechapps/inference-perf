@@ -289,3 +289,111 @@ def test_calculate_goodput_metrics_ttft_none_fails() -> None:
     assert result is not None
     assert result["goodput_percentage"] == 0.0
     assert result["good_requests"] == 0
+
+
+def test_calculate_goodput_metrics_per_request_deadline_and_output_tokens() -> None:
+    """Per-request request_latency_slo_sec activates goodput and reports output_token_goodput."""
+    m_on_time = Mock(spec=RequestLifecycleMetric)
+    m_on_time.start_time = 0.0
+    m_on_time.end_time = 4.0
+    m_on_time.info = Mock()
+    m_on_time.info.request_metrics.text.input_tokens = 20
+    m_on_time.info.response_metrics.output_tokens = 40
+    m_on_time.ttft_slo_sec = None
+    m_on_time.tpot_slo_sec = None
+    m_on_time.request_latency_slo_sec = 5.0
+
+    m_late = Mock(spec=RequestLifecycleMetric)
+    m_late.start_time = 1.0
+    m_late.end_time = 8.0
+    m_late.info = Mock()
+    m_late.info.request_metrics.text.input_tokens = 20
+    m_late.info.response_metrics.output_tokens = 50
+    m_late.ttft_slo_sec = None
+    m_late.tpot_slo_sec = None
+    m_late.request_latency_slo_sec = 5.0
+
+    m_failed_504 = Mock(spec=RequestLifecycleMetric)
+    m_failed_504.start_time = 2.0
+    m_failed_504.end_time = 10.0
+    m_failed_504.ttft_slo_sec = None
+    m_failed_504.tpot_slo_sec = None
+    m_failed_504.request_latency_slo_sec = 5.0
+
+    result = calculate_goodput_metrics(
+        [m_on_time, m_late],
+        None,
+        [None, None],
+        [None, None],
+        [0.1, 0.1],
+        [4.0, 7.0],
+        [None, None],
+        failed_metrics=[m_failed_504],
+    )
+
+    assert result is not None
+    assert result["good_requests"] == 1
+    assert result["total_requests"] == 2
+    assert result["submitted_requests"] == 3
+    assert result["goodput_percentage"] == 50.0
+    assert abs(result["submitted_goodput_percentage"] - (100.0 / 3.0)) < 1e-6
+    assert result["good_output_tokens"] == 40
+    # Window spans [0.0, 10.0] = 10.0s across successes + failures
+    assert result["request_goodput"] == 1 / 10.0
+    assert result["output_token_goodput"] == 40 / 10.0
+    assert result["token_goodput"] == 60 / 10.0
+    assert result["request_latency_attainment_percentage"] == 50.0
+
+
+def test_calculate_goodput_metrics_all_failed_requests() -> None:
+    """When every submitted request fails (e.g. 504 DEADLINE_EXCEEDED), attainment is 0%."""
+    config = GoodputConfig(constraints={"request_latency": 5.0})
+    m_fail = Mock(spec=RequestLifecycleMetric)
+    m_fail.start_time = 0.0
+    m_fail.end_time = 5.0
+    m_fail.ttft_slo_sec = None
+    m_fail.tpot_slo_sec = None
+    m_fail.request_latency_slo_sec = None
+
+    result = calculate_goodput_metrics(
+        [],
+        config,
+        [],
+        [],
+        [],
+        [],
+        [],
+        failed_metrics=[m_fail],
+    )
+    assert result is not None
+    assert result["good_requests"] == 0
+    assert result["total_requests"] == 0
+    assert result["submitted_requests"] == 1
+    assert result["goodput_percentage"] == 0.0
+    assert result["submitted_goodput_percentage"] == 0.0
+    assert result["request_goodput"] == 0.0
+    assert result["output_token_goodput"] == 0.0
+
+
+def test_extract_request_slo_thresholds_seconds_and_ms() -> None:
+    """Verify per-request deadline SLO header parsing in seconds and milliseconds."""
+    from inference_perf.client.modelserver.openai_client import extract_request_slo_thresholds
+    from inference_perf.config import APIConfig, APIType
+
+    cfg_sec = APIConfig(
+        type=APIType.Completion,
+        slo_request_latency_header="x-llm-d-request-timeout-seconds",
+        headers={"x-llm-d-request-timeout-seconds": "180"},
+    )
+    ttft, tpot, req_lat = extract_request_slo_thresholds(cfg_sec)
+    assert ttft is None
+    assert tpot is None
+    assert req_lat == 180.0
+
+    cfg_ms = APIConfig(
+        type=APIType.Completion,
+        slo_unit="ms",
+        headers={"x-slo-request-latency-ms": "2500"},
+    )
+    _, _, req_lat_override = extract_request_slo_thresholds(cfg_ms, {"x-slo-request-latency-ms": "1200"})
+    assert req_lat_override == 1.2

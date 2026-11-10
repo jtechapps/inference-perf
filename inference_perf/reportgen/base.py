@@ -461,6 +461,13 @@ def _drop_absent_blocks(dumped: dict[str, Any]) -> dict[str, Any]:
     return dumped
 
 
+def _numeric_slo(metric: Any, attr: str) -> Optional[float]:
+    val = getattr(metric, attr, None)
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        return float(val)
+    return None
+
+
 def calculate_goodput_metrics(
     metrics: List[RequestLifecycleMetric],
     goodput_config: Optional[GoodputConfig],
@@ -470,22 +477,31 @@ def calculate_goodput_metrics(
     request_latency_values: List[float],
     itl_values: List[Optional[float]],
     use_server_output_tokens: bool = False,
+    failed_metrics: Optional[List[RequestLifecycleMetric]] = None,
 ) -> Optional[dict[str, Any]]:
-    has_constraints = False
-    if goodput_config and goodput_config.constraints:
-        has_constraints = True
+    has_constraints = bool(goodput_config and goodput_config.constraints)
+    all_records = list(metrics) + list(failed_metrics or [])
 
-    if not has_constraints and not any(m.ttft_slo_sec is not None or m.tpot_slo_sec is not None for m in metrics):
+    has_per_request_slo = any(
+        _numeric_slo(m, "ttft_slo_sec") is not None
+        or _numeric_slo(m, "tpot_slo_sec") is not None
+        or _numeric_slo(m, "request_latency_slo_sec") is not None
+        for m in all_records
+    )
+    if not has_constraints and not has_per_request_slo:
         return None
 
     total = len(metrics)
-    if total == 0:
+    failed_count = len(failed_metrics) if failed_metrics is not None else 0
+    submitted_total = total + failed_count
+    if submitted_total == 0:
         return None
 
-    total_benchmark_time = max(m.end_time for m in metrics) - min(m.start_time for m in metrics)
+    total_benchmark_time = max(m.end_time for m in all_records) - min(m.start_time for m in all_records)
 
     good_requests_count = 0
     good_total_tokens = 0
+    good_output_tokens = 0
 
     attainment_counts: defaultdict[str, int] = defaultdict(int)
     total_applicable_counts: defaultdict[str, int] = defaultdict(int)
@@ -493,20 +509,23 @@ def calculate_goodput_metrics(
     for i, m in enumerate(metrics):
         is_good = True
 
+        ttft_slo = _numeric_slo(m, "ttft_slo_sec")
         effective_ttft_slo = (
-            m.ttft_slo_sec
-            if m.ttft_slo_sec is not None
-            else (goodput_config.constraints.get("ttft") if goodput_config else None)
+            ttft_slo if ttft_slo is not None else (goodput_config.constraints.get("ttft") if goodput_config else None)
         )
+        tpot_slo = _numeric_slo(m, "tpot_slo_sec")
         effective_tpot_slo = (
-            m.tpot_slo_sec
-            if m.tpot_slo_sec is not None
-            else (goodput_config.constraints.get("tpot") if goodput_config else None)
+            tpot_slo if tpot_slo is not None else (goodput_config.constraints.get("tpot") if goodput_config else None)
+        )
+        req_lat_slo = _numeric_slo(m, "request_latency_slo_sec")
+        effective_latency_slo = (
+            req_lat_slo
+            if req_lat_slo is not None
+            else (goodput_config.constraints.get("request_latency") if goodput_config else None)
         )
 
         effective_itl_slo = goodput_config.constraints.get("itl") if goodput_config else None
         effective_ntpot_slo = goodput_config.constraints.get("ntpot") if goodput_config else None
-        effective_latency_slo = goodput_config.constraints.get("request_latency") if goodput_config else None
 
         if effective_ttft_slo is not None:
             total_applicable_counts["ttft"] += 1
@@ -552,18 +571,25 @@ def calculate_goodput_metrics(
             good_requests_count += 1
             in_tokens = m.info.request_metrics.text.input_tokens
             out_tokens = effective_output_tokens(m.info.response_metrics, use_server_output_tokens)
+            good_output_tokens += out_tokens
             good_total_tokens += in_tokens + out_tokens
 
     goodput_percentage = (good_requests_count / total * 100) if total > 0 else 0.0
+    submitted_goodput_percentage = (good_requests_count / submitted_total * 100) if submitted_total > 0 else 0.0
     request_goodput = good_requests_count / total_benchmark_time if total_benchmark_time > 0 else 0.0
     token_goodput = good_total_tokens / total_benchmark_time if total_benchmark_time > 0 else 0.0
+    output_token_goodput = good_output_tokens / total_benchmark_time if total_benchmark_time > 0 else 0.0
 
     result = {
         "goodput_percentage": goodput_percentage,
+        "submitted_goodput_percentage": submitted_goodput_percentage,
         "request_goodput": request_goodput,
         "token_goodput": token_goodput,
+        "output_token_goodput": output_token_goodput,
         "good_requests": good_requests_count,
+        "good_output_tokens": good_output_tokens,
         "total_requests": total,
+        "submitted_requests": submitted_total,
     }
 
     for k in total_applicable_counts:
@@ -933,6 +959,7 @@ def summarize_requests(
         request_latency_values,
         itl_values,
         use_server_output_tokens=use_server_output_tokens,
+        failed_metrics=all_failed,
     )
 
     # --- Filter lists for summarization (remove Nones) ---
@@ -1105,7 +1132,7 @@ def build_per_request_lifecycle_entry(
 
     if fields.computed_metrics and metric.error is None:
         latency = compute_request_latency_metrics(metric, use_server_output_tokens)
-        entry["computed_metrics"] = {
+        computed: dict[str, Any] = {
             "request_latency": latency["request_latency"],
             "normalized_time_per_output_token": latency["normalized_time_per_output_token"],
             "time_to_first_token": latency["time_to_first_token"],
@@ -1118,6 +1145,10 @@ def build_per_request_lifecycle_entry(
             "ttft_slo_sec": metric.ttft_slo_sec,
             "tpot_slo_sec": metric.tpot_slo_sec,
         }
+        req_lat_slo = _numeric_slo(metric, "request_latency_slo_sec")
+        if req_lat_slo is not None:
+            computed["request_latency_slo_sec"] = req_lat_slo
+        entry["computed_metrics"] = computed
 
     entry["error"] = metric.error.model_dump() if metric.error else None
 

@@ -207,6 +207,18 @@ def goodput_findings(filename: str, contents: Any, check: str) -> List[Finding]:
     if is_number(total) and is_number(successes_count) and total != successes_count:
         findings.append(_error(check, filename, f"goodput total_requests ({total}) != successes.count ({successes_count})"))
 
+    submitted = goodput.get("submitted_requests")
+    failures_count = _get(contents, "failures", "count")
+    if is_number(submitted) and is_number(successes_count) and is_number(failures_count):
+        if submitted != successes_count + failures_count:
+            findings.append(
+                _error(
+                    check,
+                    filename,
+                    f"goodput submitted_requests ({submitted}) != successes.count ({successes_count}) + failures.count ({failures_count})",
+                )
+            )
+
     for key, value in goodput.items():
         if key.endswith("percentage") and is_number(value) and not (0 <= value <= 100 + 1e-9):
             findings.append(_error(check, filename, f"goodput {key} outside [0, 100]: {value}"))
